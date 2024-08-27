@@ -1,36 +1,71 @@
-// node.js 프로젝트와 mongodb 연동 테스트
-// 결과를 웹 브라우저에서 출력
-const http = require('http');
-const express = require('express');
+const http = require("http");
+const express = require("express");
 const app = express();
-const mongojs = require("mongojs");
-const db = mongojs('vehicle', ['car']);
+const { MongoClient } = require("mongodb");
 const path = require("path");
+const bodyParser = require("body-parser");
 
 app.set('port', 3000);
-app.set("view engine", "ejs"); // 접미사
-app.set("views", path.join(__dirname, "../views")); // 접두사: 절대 경로 + 상대 경로
+app.set("views", path.join(__dirname, "../views"));
+app.set("view engine", "ejs");
 
-app.get('/', (req, res) => {
-    console.log("GET - / 요청 ...")
-    if(db) {
-        // mongojs는 옛날 기술 - 콜백 함수로 처리.
-        db.car.find((err, result) => {
-            if(err) throw err;
-            // 접두사와 접미사 생략 - 파일명만 사용
-            req.app.render("CarList", {carList: result}, (err2, html)=>{
-                if(err2) throw err2;
-                res.end(html);
-            });
-        });
-    } else {
-        res.end("db가 연결되지 않았습니다!");
+app.use(bodyParser.urlencoded({extended: false}));
+app.use(bodyParser.json());
+app.use("/", express.static(path.join(__dirname, "../public")) );
+
+const uri = "mongodb://localhost:27017";
+const client = new MongoClient(uri);
+const dbName = "vehicle";
+const collectionName = "car";
+
+app.get("/car", async (req, res) => {
+  try {
+    client.connect();
+    const database = client.db(dbName);
+    const cars = database.collection(collectionName);
+    const query = {};
+    const options = {
+      sort: { name: 1 },
+      //projection: { _id:true, name:1, company:1, price:1, year:1 }
+      projection: {}
+    };
+    const cursor = cars.find(query, options);
+    if ((await cars.countDocuments(query)) === 0) {
+      console.log("No documents found!");
     }
+    const carList = [];
+    for await (const doc of cursor) {
+      carList.push(doc);
+      console.dir(doc);
+    }
+    req.app.render("CarList", {carList}, (err, html)=>{
+      res.end(html);
+    });
+  } finally {
+    await client.close();
+  }
+});
+
+app.post("/car", async (req, res)=> {
+  try {
+    client.connect();
+    const database = client.db(dbName);
+    const cars = database.collection(collectionName);
+    const doc = {
+      name: req.body.name,
+      price: req.body.price,
+      company: req.body.company,
+      year: req.body.year
+    }
+    const result = await cars.insertOne(doc);
+    console.log(`A document was inserted with the _id: ${result.insertedId}`);
+    res.redirect("/car");
+  } finally {
+    await client.close();
+  }
 });
 
 const server = http.createServer(app);
 server.listen(app.get('port'), ()=>{
-    // 일체유심조 (씨크리트)
-    // 백견이불여일타 (중요)
-    console.log(`서버 실행 중>>> http://localhost:${app.get('port')}`);
-});
+  console.log(`서버 실행 중 >>> http://localhost:${app.get('port')}`);
+})
